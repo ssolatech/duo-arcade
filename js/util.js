@@ -93,8 +93,11 @@ Duo.U = {
     ctx.save();
     ctx.translate(c.x, c.y);
     if (Duo.flipped) ctx.rotate(Math.PI);
+    // 가만히 서 있을 때는 누가 보든(방장/참가자) 얼굴이 보이게 화면 쪽을 본다.
+    // 움직이는 중에만 실제 방향(뒤로 걸어가면 뒷모습)을 보여 준다.
+    const moving = c.mv || c.dash > 0;
     Avatar.draw(ctx, look, 0, -4 * k, k, {
-      fx: c.fx * s, fy: c.fy * s, ring: col,
+      fx: moving ? c.fx * s : 0, fy: moving ? c.fy * s : 1, ring: col,
       bob: c.mv ? Math.sin(t * 18) * 1.2 : 0,
       ko: c.down || c.stun > 0,
       alpha: c.down ? 0.5 : 1,

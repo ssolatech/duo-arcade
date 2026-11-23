@@ -64,6 +64,7 @@
   let mode = 'local';   // 'local' 한 기기로 둘이 | 'online' 각자 기기로
   const online = () => mode === 'online' && Net.state === 'connected';
   const isGuest = () => online() && Net.role === 'guest';
+  const isGuestRole = () => mode === 'online' && Net.role === 'guest';
   const myIndex = () => (isGuest() ? 1 : 0);
   function names() {
     if (online()) return Net.role === 'host' ? [D().names[0], Net.peerName] : [Net.peerName, D().names[0]];
@@ -325,8 +326,12 @@
     const res = R.res, nm = names(), g = R.game;
     const box = el('div', 'pbox');
     if (R.phase === 'pause') {
-      box.append(el('h2', '', '일시정지'));
-      box.append(panelBtns([['계속하기', 'resume', 'primary'], ['그만하기', 'menu', '']]));
+      const waiting = mode === 'online' && (Net.state === 'waitback' || Net.peerAway);
+      box.append(el('h2', '', waiting ? '💤 기다리는 중' : '일시정지'));
+      if (waiting) box.append(el('p', 'pdim', Net.state === 'waitback' ? `${Net.peerName}님과 다시 연결하는 중… 최대 5분 기다려요. 돌아오면 이어서 해요.` : `${Net.peerName}님이 화면을 껐어요. 돌아오면 이어서 해요.`));
+      const btns = panelBtns([['계속하기', 'resume', 'primary'], ['그만하기', 'menu', '']]);
+      if (Net.state === 'waitback') btns.firstChild.disabled = true;
+      box.append(btns);
     } else if (res.coop) {
       box.append(el('div', 'pbig', res.clear ? '🎉' : '💦'));
       box.append(el('h2', '', res.clear ? `${res.stage}판 클리어!` : `${res.stage}판 실패`));
@@ -356,6 +361,26 @@
     // 같은 기기 모드에서는 각자 조작판에도 결과 표시 (2P는 거꾸로 앉아 있으니)
   }
 
+  // 상대가 화면을 껐거나 끊겨서 멈춘 경우(autoPaused) → 돌아오면 자동으로 이어서
+  function hostPause() {
+    if (R.phase === 'play' || R.phase === 'cd') { R.phase = 'pause'; R.autoPaused = true; }
+    if (R.phase === 'pause') showPanel();
+  }
+
+  function waitPanel() {
+    const panel = $('#g-panel');
+    panel.innerHTML = '';
+    panel.hidden = false;
+    const box = el('div', 'pbox');
+    box.append(el('div', 'pbig', '📶'), el('h2', '', '다시 연결하는 중…'),
+      el('p', 'pdim', '최대 5분 동안 자동으로 다시 붙어요. 연결되면 이어서 해요.'));
+    const b = el('button', 'btn', '그만하기');
+    b.addEventListener('click', () => { Net.leave(); leaveGame(); });
+    const row = el('div', 'prow'); row.append(b);
+    box.append(row);
+    panel.append(box);
+  }
+
   function panelBtns(list) {
     const row = el('div', 'prow');
     for (const [label, cmd, cls] of list) {
@@ -368,6 +393,7 @@
 
   // 명령: 참가자는 방장에게 부탁하고, 방장/한 기기는 바로 실행
   function command(cmd) {
+    if (isGuestRole() && Net.state === 'waitback') { if (cmd === 'menu') { Net.leave(); leaveGame(); } return; }
     if (isGuest()) {
       if (cmd === 'menu' && (R.phase === 'play' || R.phase === 'cd' || R.phase === 'pause')) { Net.send({ t: 'cmd', c: 'menu' }); return; }
       Net.send({ t: 'cmd', c: cmd });
@@ -381,8 +407,8 @@
     if (cmd === 'again') startGame(R.game.id, R.game.type === 'coop' ? { stage: R.res ? R.res.stage : (R.opts.stage || 1) } : {});
     else if (cmd === 'next') startGame(R.game.id, { stage: (R.res ? R.res.stage : 1) + 1 });
     else if (cmd === 'menu') { if (online()) Net.send({ t: 'menu' }); leaveGame(); }
-    else if (cmd === 'pause') { if (R.phase === 'play') { R.phase = 'pause'; showPanel(); } }
-    else if (cmd === 'resume') { if (R.phase === 'pause') { R.phase = 'cd'; R.cd = 3; R.lastCd = 4; $('#g-panel').hidden = true; } }
+    else if (cmd === 'pause') { if (R.phase === 'play' || R.phase === 'cd') { R.phase = 'pause'; R.autoPaused = false; showPanel(); } }
+    else if (cmd === 'resume') { if (R.phase === 'pause' && !(mode === 'online' && Net.state === 'waitback')) { R.autoPaused = false; R.phase = 'cd'; R.cd = 3; R.lastCd = 4; $('#g-panel').hidden = true; } }
   }
 
   // ================= 친구와 맞추기 · 복구 · 소원 목록 =================
@@ -507,6 +533,41 @@
   // 온라인 메시지 처리
   Net.onMsg = (d) => {
     if (onShared(d)) return;
+    // ---- 잠깐 끊김 · 자리 비움 · 재연결 ----
+    if (d.t === 'away') {
+      toast(`${Net.peerName}님이 화면을 껐어요. 돌아올 때까지 기다릴게요 💤`);
+      if (R.game && !isGuest()) hostPause();
+      else if (R.game && R.phase === 'pause') showPanel();
+      return;
+    }
+    if (d.t === 'back') {
+      toast(`${Net.peerName}님이 돌아왔어요!`);
+      if (R.game && !isGuest() && R.phase === 'pause' && R.autoPaused) doCommand('resume');
+      else if (R.game && R.phase === 'pause') showPanel();
+      return;
+    }
+    if (d.t === 'drop') {
+      toast('연결이 잠깐 끊겼어요. 다시 붙는 중… (최대 5분)');
+      if (R.game) {
+        if (!isGuestRole()) hostPause();
+        else waitPanel();
+      }
+      return;
+    }
+    if (d.t === 'resumed') {
+      toast('다시 연결됐어요! 🎉');
+      if (Net.role === 'host' && R.game) {
+        if (R.phase === 'over') { Net.send({ t: 'menu' }); leaveGame(); }
+        else {
+          Net.send({ t: 'start', id: R.game.id, opts: R.opts, mid: R.mid });   // 친구 화면을 게임으로
+          if (R.phase === 'pause' && R.autoPaused) doCommand('resume');
+          else if (R.phase === 'pause') showPanel();
+        }
+      }
+      if (Net.role === 'host' && !R.game) Net.send({ t: 'menu' });   // 방장 앱이 다시 열렸으면 하던 게임은 끝
+      if (Net.role === 'guest' && R.game) $('#g-panel').hidden = true;
+      return;
+    }
     if (d.t === 'lost') {
       toast('연결이 끊겼어요. 한 기기 모드로 돌아갑니다.');
       mode = 'local';
@@ -725,7 +786,7 @@
       const s = Net.state;
       if (s === 'connected') {
         const box = el('div', 'net-ok');
-        box.append(el('b', '', `✅ ${Net.peerName || '상대'}님과 연결됨`));
+        box.append(el('b', '', `✅ ${Net.peerName || '상대'}님과 연결됨${Net.peerAway ? ' (잠깐 자리 비움 💤)' : ''}`));
         box.append(el('span', '', Net.role === 'host' ? `방장(1P · 파랑) · 코드 ${Net.code}` : `참가자(2P · 분홍) · 코드 ${Net.code}`));
         body.append(box);
         if (Net.error) body.append(el('p', 'err', Net.error));
@@ -737,6 +798,16 @@
         const bye = el('button', 'btn', '연결 끊기');
         bye.addEventListener('click', () => { Net.leave(); renderHome(); });
         body.append(bye);
+      } else if (s === 'waitback') {
+        const box = el('div', 'net-code');
+        box.append(el('span', '', `${Net.peerName || '상대'}님과 다시 연결하는 중…`));
+        box.append(el('b', 'small-b', '📶'));
+        const left = Math.max(0, Math.ceil((Net.waitUntil - Date.now()) / 60000));
+        box.append(el('span', '', `화면을 다시 켜거나 앱을 다시 열면 자동으로 붙어요 · 최대 ${left || 1}분`));
+        body.append(box);
+        const c = el('button', 'btn', '그만 기다리기');
+        c.addEventListener('click', () => Net.leave());
+        body.append(c);
       } else if (s === 'waiting') {
         const box = el('div', 'net-code');
         box.append(el('span', '', '상대에게 이 코드를 알려주세요'));
@@ -1113,7 +1184,12 @@
 
   renderSettings();
   renderSheetLink();
-  if (!D().chars[0]) openCreator(0); else { show('home'); renderHome(); }
+  if (!D().chars[0]) openCreator(0);
+  else {
+    show('home');
+    if (Net.hasSession()) { mode = 'online'; Net.resume(); }
+    renderHome();
+  }
 
   // 테스트용 (개발자 도구 콘솔에서 확인)
   window.__duo = { R, IN, Net, startGame, mode: () => mode };
