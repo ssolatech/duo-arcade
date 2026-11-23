@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<!-- 보안 정책: 이 사이트의 파일만 실행. 온라인 연결용 무료 서버(0.peerjs.com)만 접속 허용 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="theme-color" content="#0d0b14">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="듀오 아케이드">
+<meta name="description" content="둘이서 같이 하는 협동·대결 미니게임">
+<title>듀오 아케이드</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 홈 -->
+<main id="home" class="screen" hidden>
+  <header class="hub-head">
+    <h1><span class="c1">DUO</span> <span class="c2">ARCADE</span></h1>
+    <p>둘이서 하는 협동 · 대결 미니게임</p>
+  </header>
+
+  <section class="mode">
+    <div id="mode-seg" class="seg">
+      <button data-mode="local">📱 한 기기로 둘이<small>비행기 모드 OK</small></button>
+      <button data-mode="online">📡 각자 기기로<small>코드로 연결</small></button>
+    </div>
+    <div id="mode-body" class="mode-body"></div>
+  </section>
+
+  <h3 class="sec-title">⚔️ 대결 <small>이기면 소원권 🎟 +1</small></h3>
+  <div id="list-vs" class="cards"></div>
+
+  <h3 class="sec-title">🤝 협동 <small>클리어하면 다음 판 · 자동 저장</small></h3>
+  <div id="list-coop" class="cards"></div>
+
+  <button class="btn wish-btn" id="btn-wish">🎟 소원권 · 전적 보기</button>
+
+  <section class="settings">
+    <h3 class="sec-title">설정</h3>
+    <div class="btn-col">
+      <button class="btn" id="btn-sound"></button>
+      <button class="btn" id="btn-vib"></button>
+      <button class="btn" id="btn-export">저장 백업 (코드 복사)</button>
+      <button class="btn" id="btn-import">저장 불러오기</button>
+      <button class="btn primary" id="btn-install" hidden>앱으로 설치하기</button>
+      <button class="btn danger" id="btn-reset">기록 전체 초기화</button>
+    </div>
+    <p class="hint">브라우저 메뉴에서 <b>홈 화면에 추가</b>를 해 두면 비행기 모드에서도 앱처럼 열 수 있어요.</p>
+    <p class="version" id="app-version"></p>
+  </section>
+</main>
+
+<!-- 캐릭터 만들기 / 꾸미기 -->
+<main id="creator" class="screen" hidden>
+  <h2 id="cr-title" class="screen-title"></h2>
+
+  <section id="cr-gender">
+    <p class="hint center">먼저 성별을 골라 주세요. <b>한 번 정하면 바꿀 수 없어요.</b><br>머리·옷·소품은 나중에도 언제든 꾸밀 수 있어요.</p>
+    <div id="cr-gender-btns" class="gender-row"></div>
+  </section>
+
+  <section id="cr-edit" hidden>
+    <div class="preview-box"><canvas id="cr-prev"></canvas></div>
+    <p id="cr-gnote" class="hint center"></p>
+    <button class="link-btn" id="cr-regender">← 성별 다시 고르기</button>
+    <label class="name-row">이름
+      <input id="cr-name" class="text-input" maxlength="8" autocomplete="off">
+    </label>
+    <div id="cr-opts"></div>
+    <div class="btn-col sticky-actions">
+      <button class="btn primary" id="cr-save">저장</button>
+      <button class="btn" id="cr-cancel">취소</button>
+    </div>
+  </section>
+</main>
+
+<!-- 소원권 · 전적 -->
+<main id="wish" class="screen" hidden>
+  <header class="top-bar">
+    <button class="icon-btn" id="wish-back" aria-label="뒤로">◀</button>
+    <h2>🎟 소원권 · 전적</h2>
+    <span class="icon-btn ghost"></span>
+  </header>
+  <h3 class="sec-title">🏆 순위</h3>
+  <div id="rank" class="rank"></div>
+
+  <h3 class="sec-title">🎁 소원 쓰기</h3>
+  <p id="wish-who" class="hint"></p>
+  <div id="rewards" class="rewards"></div>
+  <button class="btn small-wide" id="btn-edit-rw"></button>
+
+  <h3 class="sec-title">📜 사용 기록</h3>
+  <div id="wish-log"></div>
+  <p class="hint">기록은 이 기기에 저장돼요. 다른 기기로 옮길 땐 홈의 ‘저장 백업’을 써 주세요.</p>
+</main>
+
+<!-- 게임 -->
+<main id="game" class="screen" hidden>
+  <div id="zone2" class="zone rot"></div>
+  <div id="field">
+    <canvas id="cv"></canvas>
+    <button class="fbtn tl" id="g-back" aria-label="그만하기">✕</button>
+    <button class="fbtn tr" id="g-pause" aria-label="일시정지">❚❚</button>
+    <div id="g-cd" class="cd"></div>
+    <div id="g-panel" class="panel" hidden></div>
+  </div>
+  <div id="zone1" class="zone"></div>
+</main>
+
+<div id="overlay" hidden></div>
+<div id="toast"></div>
+
+<script src="js/version.js"></script>
+<script src="js/avatar.js"></script>
+<script src="js/store.js"></script>
+<script src="js/util.js"></script>
+<script src="js/net.js"></script>
+<script src="js/games/quick.js"></script>
+<script src="js/games/pong.js"></script>
+<script src="js/games/stars.js"></script>
+<script src="js/games/paint.js"></script>
+<script src="js/games/meteor.js"></script>
+<script src="js/games/simon.js"></script>
+<script src="js/games/gems.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
