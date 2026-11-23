@@ -18,6 +18,8 @@ const Store = (() => {
     ],
     log: [],                        // [{d 시각, n 이름, x 소원}]
     coop: {},                       // {게임id: {cur 다음에 할 판, best 최고 클리어}}
+    friends: [],                    // 방장 폰에 보관하는 친구 정보 (복구용) [{n, look, coop, at}]
+    sheetId: '',                    // 업로드한 구글 시트 ID
   });
 
   const int = (v, min, max, def) => {
@@ -26,6 +28,54 @@ const Store = (() => {
   };
   const text = (s, max) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, max);
   const name = (s, def) => text(s, 8) || def;
+
+  // ---- 값 검사 (저장 불러오기, 구글 시트, 상대 기기에서 받은 값 모두 여기를 거친다) ----
+  function cleanPlayer(p) {
+    if (!p || typeof p !== 'object') return null;
+    const n = text(p.n, 8);
+    if (!n) return null;
+    const w = int(p.w, 0, 99999, 0), u = int(p.u, 0, 99999, 0);
+    // 소원권은 '이긴 횟수 - 쓴 장수'로 계산 (따로 부풀릴 수 없게)
+    return { n, w, l: int(p.l, 0, 99999, 0), d: int(p.d, 0, 99999, 0), u: Math.min(u, w), t: Math.max(0, w - u) };
+  }
+  function cleanRewards(list) {
+    if (!Array.isArray(list)) return null;
+    const r = [];
+    for (const x of list.slice(0, 20)) {
+      if (!x || typeof x !== 'object') continue;
+      const t = text(x.x, 30);
+      if (t) r.push({ c: int(x.c, 1, 999, 3), x: t });
+    }
+    return r;
+  }
+  function cleanLog(list) {
+    const out = [];
+    if (!Array.isArray(list)) return out;
+    for (const x of list.slice(0, 50)) {
+      if (!x || typeof x !== 'object') continue;
+      const n = text(x.n, 8), t = text(x.x, 30);
+      if (n && t) out.push({ d: int(x.d, 0, 9e15, 0), n, x: t });
+    }
+    return out;
+  }
+  function cleanCoop(raw) {
+    const out = {};
+    if (!raw || typeof raw !== 'object') return out;
+    for (const k of Object.keys(raw).slice(0, 30)) {
+      if (!/^[a-z]{2,12}$/.test(k)) continue;
+      const c = raw[k];
+      if (!c || typeof c !== 'object') continue;
+      out[k] = { cur: int(c.cur, 1, 999, 1), best: int(c.best, 0, 999, 0) };
+    }
+    return out;
+  }
+  function cleanFriend(f) {
+    if (!f || typeof f !== 'object') return null;
+    const n = text(f.n, 8);
+    const look = Avatar.clean(f.look);
+    if (!n || !look) return null;
+    return { n, look, coop: cleanCoop(f.coop), at: int(f.at, 0, 9e15, 0) };
+  }
 
   function sanitize(raw) {
     const d = DEF();
@@ -36,37 +86,23 @@ const Store = (() => {
     d.vib = raw.vib === 0 ? 0 : 1;
     if (Array.isArray(raw.players)) {
       const seen = new Set();
-      for (const p of raw.players.slice(0, 40)) {
-        if (!p || typeof p !== 'object') continue;
-        const n = text(p.n, 8);
-        if (!n || seen.has(n)) continue;
-        seen.add(n);
-        d.players.push({ n, t: int(p.t, 0, 9999, 0), w: int(p.w, 0, 99999, 0), l: int(p.l, 0, 99999, 0), d: int(p.d, 0, 99999, 0), u: int(p.u, 0, 99999, 0) });
+      for (const x of raw.players.slice(0, 40)) {
+        const p = cleanPlayer(x);
+        if (p && !seen.has(p.n)) { seen.add(p.n); d.players.push(p); }
       }
     }
-    if (Array.isArray(raw.rewards)) {
-      const r = [];
-      for (const x of raw.rewards.slice(0, 20)) {
-        if (!x || typeof x !== 'object') continue;
-        const t = text(x.x, 30);
-        if (t) r.push({ c: int(x.c, 1, 999, 3), x: t });
-      }
-      d.rewards = r;
-    }
-    if (Array.isArray(raw.log)) {
-      for (const x of raw.log.slice(0, 50)) {
-        if (!x || typeof x !== 'object') continue;
-        d.log.push({ d: int(x.d, 0, 9e15, 0), n: text(x.n, 8), x: text(x.x, 30) });
+    const rw = cleanRewards(raw.rewards);
+    if (rw) d.rewards = rw;
+    d.log = cleanLog(raw.log);
+    d.coop = cleanCoop(raw.coop);
+    if (Array.isArray(raw.friends)) {
+      const seen = new Set();
+      for (const x of raw.friends.slice(0, 20)) {
+        const f = cleanFriend(x);
+        if (f && !seen.has(f.n)) { seen.add(f.n); d.friends.push(f); }
       }
     }
-    if (raw.coop && typeof raw.coop === 'object') {
-      for (const k of Object.keys(raw.coop).slice(0, 30)) {
-        if (!/^[a-z]{2,12}$/.test(k)) continue;
-        const c = raw.coop[k];
-        if (!c || typeof c !== 'object') continue;
-        d.coop[k] = { cur: int(c.cur, 1, 999, 1), best: int(c.best, 0, 999, 0) };
-      }
-    }
+    if (typeof raw.sheetId === 'string' && /^[\w-]{20,100}$/.test(raw.sheetId)) d.sheetId = raw.sheetId;
     return d;
   }
 
@@ -133,8 +169,110 @@ const Store = (() => {
 
   function reset() { data = DEF(); save(); }
 
+  // ================= 친구와 맞추기 · 복구 =================
+  // 규칙: 각자의 기록(이름·캐릭터·승패·소원권)은 그 사람 폰이 원본이다.
+  //  - 연결하면 서로 '자기 기록'만 보내고, 받는 쪽은 그 사람 줄만 갱신한다.
+  //  - 받은 기록이 내가 가진 것보다 적으면(폰 데이터가 지워진 경우) 덮어쓰지 않는다.
+  //  - 소원 목록은 '둘의 규칙'이라 방장 기준으로 맞춘다.
+  const total = (p) => (p ? p.w + p.l + p.d : 0);
+
+  function takeOwnerRecord(raw) {
+    const p = cleanPlayer(raw);
+    if (!p) return 'bad';
+    const cur = data.players.find((x) => x.n === p.n);
+    if (cur && (total(p) < total(cur) || p.u < cur.u)) return 'older';
+    if (cur) Object.assign(cur, p); else data.players.push(p);
+    save();
+    return 'ok';
+  }
+
+  function mergeLog(list) {
+    const seen = new Set(data.log.map((l) => `${l.d}|${l.n}|${l.x}`));
+    for (const l of cleanLog(list)) {
+      const k = `${l.d}|${l.n}|${l.x}`;
+      if (!seen.has(k)) { seen.add(k); data.log.push(l); }
+    }
+    data.log.sort((a, b) => b.d - a.d);
+    data.log.length = Math.min(data.log.length, 50);
+    save();
+  }
+
+  function myRecord() {
+    const p = data.players.find((x) => x.n === data.names[0]);
+    return p ? Object.assign({}, p) : { n: data.names[0], w: 0, l: 0, d: 0, u: 0, t: 0 };
+  }
+  const logsOf = (n) => data.log.filter((l) => l.n === n);
+
+  function mergeCoop(into, from) {
+    for (const [k, c] of Object.entries(cleanCoop(from))) {
+      const cur = into[k];
+      into[k] = cur ? { cur: Math.max(cur.cur, c.cur), best: Math.max(cur.best, c.best) } : c;
+    }
+  }
+
+  // 방장 폰에 친구 정보 보관 (연결할 때마다 자동)
+  function saveFriend(n, look, coop) {
+    const f0 = cleanFriend({ n, look, coop: {}, at: Date.now() });
+    if (!f0) return;
+    let f = data.friends.find((x) => x.n === f0.n);
+    if (!f) { f = f0; data.friends.push(f); }
+    f.look = f0.look; f.at = f0.at;
+    mergeCoop(f.coop, coop);
+    data.friends.sort((a, b) => b.at - a.at);
+    data.friends.length = Math.min(data.friends.length, 20);
+    save();
+  }
+
+  function setRewards(list) {
+    const r = cleanRewards(list);
+    if (!r) return false;
+    const changed = JSON.stringify(r) !== JSON.stringify(data.rewards);
+    data.rewards = r;
+    save();
+    return changed;
+  }
+
+  // 친구에게 보낼 복구 묶음 (방장 폰에 보관된 그 친구 것만)
+  function restorePack(n) {
+    const f = data.friends.find((x) => x.n === n);
+    if (!f) return null;
+    const rec = data.players.find((x) => x.n === n);
+    return { n: f.n, look: f.look, coop: f.coop, rec: rec || null, log: logsOf(n) };
+  }
+
+  function checkPack(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const n = text(raw.n, 8), look = Avatar.clean(raw.look);
+    if (!n || !look) return null;
+    const rec = cleanPlayer(raw.rec);
+    return { n, look, coop: cleanCoop(raw.coop), rec: rec && rec.n === n ? rec : null, log: cleanLog(raw.log).filter((l) => l.n === n) };
+  }
+
+  // 친구 폰: '복구'를 눌렀을 때만 실행
+  function applyRestore(pack) {
+    data.names[0] = pack.n;
+    data.chars[0] = pack.look;
+    mergeCoop(data.coop, pack.coop);
+    if (pack.rec) {
+      const cur = data.players.find((x) => x.n === pack.n);
+      if (!cur) data.players.push(pack.rec);
+      else if (total(pack.rec) >= total(cur)) Object.assign(cur, pack.rec);
+    }
+    mergeLog(pack.log);
+    save();
+  }
+
+  // 구글 시트 '소원 목록' 탭에서 읽은 줄들
+  function rewardsFromRows(rows) {
+    if (!Array.isArray(rows)) return null;
+    const list = rows.map((r) => (Array.isArray(r) ? { c: r[0], x: r[1] } : null)).filter((x) => x && Number(x.c) >= 1 && text(x.x, 30));
+    return list.length ? cleanRewards(list) : null;
+  }
+
   return {
     get data() { return data; },
     save, player, addMatch, coopResult, useReward, exportCode, importCode, reset, text, name, int,
+    takeOwnerRecord, mergeLog, myRecord, logsOf, saveFriend, setRewards, restorePack, checkPack, applyRestore,
+    rewardsFromRows, cleanCoop, total,
   };
 })();

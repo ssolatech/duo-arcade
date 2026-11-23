@@ -291,6 +291,7 @@
     wake(false);
     show('home');
     renderHome();
+    if (pendingRestore && online()) askRestore(pendingRestore);
   }
 
   // 결과 처리 (양쪽 기기 모두 기록)
@@ -384,8 +385,128 @@
     else if (cmd === 'resume') { if (R.phase === 'pause') { R.phase = 'cd'; R.cd = 3; R.lastCd = 4; $('#g-panel').hidden = true; } }
   }
 
+  // ================= 친구와 맞추기 · 복구 · 소원 목록 =================
+  // 연결되면 서로 '자기 기록'만 보낸다. 방장은 소원 목록도 보낸다(방장 기준).
+  function sendSync() {
+    const me = Store.myRecord();
+    const msg = { t: 'sync', rec: me, log: Store.logsOf(me.n), coop: D().coop };
+    if (Net.role === 'host') msg.rw = D().rewards;
+    Net.send(msg);
+  }
+
+  function onSync(d) {
+    const peer = Net.peerName;
+    if (d.rec && typeof d.rec === 'object' && Store.text(d.rec.n, 8) === peer) {
+      const r = Store.takeOwnerRecord(d.rec);
+      if (r === 'older') {
+        toast(Net.role === 'host'
+          ? `${peer}님 폰의 기록이 내 보관본보다 적어요. ‘친구 기록 보내기’로 복구해 줄 수 있어요.`
+          : '방장 폰의 기록이 줄어 있어요. 방장 폰에서 백업을 불러오게 알려주세요.');
+      }
+      if (Array.isArray(d.log)) Store.mergeLog(d.log.filter((l) => l && l.n === peer));
+    }
+    if (Net.role === 'host') Store.saveFriend(peer, Net.peerLook, d.coop);
+    if (Net.role === 'guest' && Array.isArray(d.rw) && Store.setRewards(d.rw)) toast('방장의 소원 목록으로 맞췄어요 🎟');
+    refreshViews();
+  }
+
+  // 소원 목록을 고치면 연결된 상대에게도 바로 보낸다
+  function rewardsChanged() {
+    Store.save();
+    if (online()) Net.send({ t: 'rw', rw: D().rewards });
+  }
+
+  function refreshViews() {
+    if (!$('#home').hidden) renderHome();
+    if (!$('#wish').hidden) renderWish();
+  }
+
+  // 방장(또는 보관본이 있는 쪽): 친구 기록 보내기
+  function openSendRestore() {
+    const fs = D().friends;
+    if (!fs.length) { toast('보관된 친구 기록이 없어요.'); return; }
+    const list = el('div', 'friend-list');
+    for (const f of fs) {
+      const b = el('button', 'friend-pick');
+      const cv = el('canvas'); cv.width = 72; cv.height = 78;
+      drawMini(cv, f.look);
+      const rec = D().players.find((p) => p.n === f.n);
+      const tx = el('span', 'char-text');
+      tx.append(el('b', '', f.n), el('span', '', rec ? `${rec.w}승 ${rec.l}패 · 🎟 ${rec.t}장` : '전적 없음'));
+      b.append(cv, tx);
+      b.addEventListener('click', () => {
+        $('#overlay').hidden = true;
+        const pack = Store.restorePack(f.n);
+        if (!pack || !online()) return;
+        Net.send({ t: 'restore', pack });
+        toast(`보냈어요. ${Net.peerName}님 폰에서 ‘복구’를 눌러야 적용돼요.`);
+      });
+      list.append(b);
+    }
+    dialog(`${Net.peerName}님에게 보낼 기록을 골라요`, [['취소', null, '']], list);
+  }
+
+  // 친구 폰: 복구 제안 받기 (직접 '복구'를 눌러야 적용)
+  let pendingRestore = null;
+  function askRestore(pack) {
+    if (R.game) { pendingRestore = pack; return; }   // 게임 끝나고 보여주기
+    pendingRestore = null;
+    const box = el('div', 'req');
+    const cv = el('canvas'); cv.width = 96; cv.height = 104;
+    drawMini(cv, pack.look);
+    const rec = pack.rec;
+    const coopN = Object.keys(pack.coop).length;
+    box.append(cv, el('b', '', pack.n),
+      el('p', 'hint center', `${rec ? `${rec.w}승 ${rec.l}패 ${rec.d}무 · 소원권 ${rec.t}장` : '전적 없음'}${coopN ? ` · 협동 ${coopN}개 진행` : ''}`),
+      el('p', 'hint center', '복구하면 지금 내 이름·캐릭터가 이걸로 바뀌어요. 내 기록이 맞을 때만 눌러 주세요.'));
+    dialog(`${Net.peerName}님이 예전 기록을 보내왔어요`, [
+      ['복구', () => {
+        Store.applyRestore(pack);
+        Net.send({ t: 'profile', name: D().names[0], look: D().chars[0] });
+        sendSync();
+        Sound.play('clear');
+        toast('복구했어요! 🎉');
+        refreshViews();
+      }, 'primary'],
+      ['괜찮아요', () => toast('복구하지 않았어요.'), ''],
+    ], box);
+  }
+
+  function onShared(d) {
+    // 게임 밖 메시지 (양쪽 공통). 처리했으면 true
+    if (d.t === 'sync') { onSync(d); return true; }
+    if (d.t === 'rw') {
+      if (Store.setRewards(d.rw)) { toast(`${Net.peerName}님이 소원 목록을 바꿨어요 🎟`); refreshViews(); }
+      return true;
+    }
+    if (d.t === 'restore') {
+      const pack = Store.checkPack(d.pack);
+      if (pack) askRestore(pack);
+      return true;
+    }
+    if (d.t === 'profile') {
+      let n = Store.name(d.name, Net.peerName);
+      if (n === D().names[0]) n = n.slice(0, 7) + '2';
+      // 복구 전에 잠깐 쓰던 임시 캐릭터(전적 없음)는 보관함에서 지운다
+      const old = Net.peerName;
+      const oldRec = D().players.find((p) => p.n === old);
+      if (Net.role === 'host' && old !== n && !Store.total(oldRec)) {
+        D().friends = D().friends.filter((f) => f.n !== old);
+        Store.save();
+      }
+      Net.peerName = n;
+      Net.peerLook = Avatar.clean(d.look) || Net.peerLook;
+      if (Net.role === 'host') Store.saveFriend(n, Net.peerLook, {});
+      toast(`${n}님의 기록이 복구됐어요`);
+      refreshViews();
+      return true;
+    }
+    return false;
+  }
+
   // 온라인 메시지 처리
   Net.onMsg = (d) => {
+    if (onShared(d)) return;
     if (d.t === 'lost') {
       toast('연결이 끊겼어요. 한 기기 모드로 돌아갑니다.');
       mode = 'local';
@@ -428,7 +549,12 @@
       else if (R.phase !== 'pause' && R.phase !== 'over' && (prev === 'pause' || prev === 'over')) $('#g-panel').hidden = true;
     }
   };
-  Net.onChange = () => { if (!$('#home').hidden) renderHome(); };
+  let lastNetState = 'off';
+  Net.onChange = () => {
+    if (Net.state === 'connected' && lastNetState !== 'connected') sendSync();
+    lastNetState = Net.state;
+    if (!$('#home').hidden) renderHome();
+  };
   // 누군가 코드를 입력해 들어오려 할 때: 방장이 직접 보고 수락/거절
   let reqOpen = false;
   Net.onRequest = (req) => {
@@ -603,6 +729,11 @@
         box.append(el('span', '', Net.role === 'host' ? `방장(1P · 파랑) · 코드 ${Net.code}` : `참가자(2P · 분홍) · 코드 ${Net.code}`));
         body.append(box);
         if (Net.error) body.append(el('p', 'err', Net.error));
+        if (D().friends.length) {
+          const rs = el('button', 'btn', '📦 친구 기록 보내기 (복구용)');
+          rs.addEventListener('click', openSendRestore);
+          body.append(rs);
+        }
         const bye = el('button', 'btn', '연결 끊기');
         bye.addEventListener('click', () => { Net.leave(); renderHome(); });
         body.append(bye);
@@ -861,10 +992,10 @@
       if (editRewards) {
         const c = el('input', 'text-input cost'); c.type = 'number'; c.min = 1; c.max = 999; c.value = r.c;
         const x = el('input', 'text-input'); x.maxLength = 30; x.value = r.x;
-        c.addEventListener('change', () => { r.c = Store.int(c.value, 1, 999, r.c); c.value = r.c; Store.save(); });
-        x.addEventListener('change', () => { r.x = Store.text(x.value, 30) || r.x; x.value = r.x; Store.save(); });
+        c.addEventListener('change', () => { r.c = Store.int(c.value, 1, 999, r.c); c.value = r.c; rewardsChanged(); });
+        x.addEventListener('change', () => { r.x = Store.text(x.value, 30) || r.x; x.value = r.x; rewardsChanged(); });
         const del = el('button', 'icon-btn', '✕');
-        del.addEventListener('click', () => { D().rewards.splice(i, 1); Store.save(); renderWish(); });
+        del.addEventListener('click', () => { D().rewards.splice(i, 1); rewardsChanged(); renderWish(); });
         row.append(el('span', '', '🎟'), c, el('span', '', '장'), x, del);
       } else {
         row.append(el('span', 'cost-b', `🎟 ${r.c}장`), el('span', 'rx', r.x));
@@ -881,7 +1012,7 @@
     });
     if (editRewards) {
       const add = el('button', 'btn', '+ 소원 추가');
-      add.addEventListener('click', () => { if (D().rewards.length < 20) { D().rewards.push({ c: 3, x: '새 소원' }); Store.save(); renderWish(); } });
+      add.addEventListener('click', () => { if (D().rewards.length < 20) { D().rewards.push({ c: 3, x: '새 소원' }); rewardsChanged(); renderWish(); } });
       rw.append(add);
     }
     $('#btn-edit-rw').textContent = editRewards ? '편집 끝' : '소원 목록 편집';
@@ -924,6 +1055,47 @@
     dialog('정말 모든 기록을 지울까요?', [['전적·소원권·진행 모두 지우기', () => { Store.reset(); renderHome(); renderSettings(); toast('초기화했어요.'); }, 'danger'], ['취소', null, '']]);
   });
 
+  // ================= 구글 시트 =================
+  function renderSheetLink() {
+    const a = $('#g-link');
+    if (D().sheetId) { a.href = GSheet.url(D().sheetId); a.hidden = false; } else a.hidden = true;
+  }
+  // 로그인 창이 막히지 않게, 설정 버튼이 화면에 보이면 구글 스크립트를 미리 불러 둔다
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((ents) => {
+      if (ents.some((e) => e.isIntersecting) && navigator.onLine) { GSheet.prepare().catch(() => {}); io.disconnect(); }
+    });
+    io.observe($('#btn-gup'));
+  }
+  let gBusy = false;
+  async function gRun(btn, label, fn) {
+    if (gBusy) return;
+    if (!navigator.onLine) { toast('인터넷이 연결돼 있을 때 할 수 있어요.'); return; }
+    gBusy = true;
+    const old = btn.textContent;
+    btn.textContent = label;
+    btn.disabled = true;
+    try { await fn(); }
+    catch (e) { toast(e && e.message ? e.message : '구글 시트 작업에 실패했어요.'); }
+    finally { gBusy = false; btn.textContent = old; btn.disabled = false; renderSheetLink(); }
+  }
+  $('#btn-gup').addEventListener('click', () => gRun($('#btn-gup'), '업로드 중…', async () => {
+    await GSheet.upload();
+    toast('구글 시트에 업로드했어요 ☁');
+  }));
+  $('#btn-gdown').addEventListener('click', () => {
+    dialog('구글 시트 내용으로 이 폰의 기록을 바꿀까요?', [
+      ['내려받기', () => gRun($('#btn-gdown'), '내려받는 중…', async () => {
+        await GSheet.download();
+        if (online() && Net.role === 'host') Net.send({ t: 'rw', rw: D().rewards });   // 소원 목록은 친구에게도
+        toast('구글 시트에서 내려받았어요!');
+        renderSettings();
+        refreshViews();
+      }), 'primary'],
+      ['취소', null, ''],
+    ], el('p', 'hint center', '캐릭터·전적·소원권·소원 목록·협동 진행이 마지막 업로드 때로 돌아가요.'));
+  });
+
   // 앱 설치
   let installEvt = null;
   addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; $('#btn-install').hidden = false; });
@@ -940,6 +1112,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 
   renderSettings();
+  renderSheetLink();
   if (!D().chars[0]) openCreator(0); else { show('home'); renderHome(); }
 
   // 테스트용 (개발자 도구 콘솔에서 확인)

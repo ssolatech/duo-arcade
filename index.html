@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<!-- 보안 정책: 이 사이트의 파일만 실행. 온라인 연결용 무료 서버(0.peerjs.com)만 접속 허용 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<!-- 보안 정책: 이 사이트 파일 + 구글 로그인만 실행. 접속은 온라인 연결 서버(0.peerjs.com)와 구글 시트 API만 허용 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data:; connect-src 'self' https://0.peerjs.com wss://0.peerjs.com https://www.googleapis.com https://sheets.googleapis.com https://oauth2.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#0d0b14">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -47,11 +47,15 @@
     <div class="btn-col">
       <button class="btn" id="btn-sound"></button>
       <button class="btn" id="btn-vib"></button>
+      <button class="btn primary" id="btn-gup">☁ 구글 시트에 업로드</button>
+      <button class="btn" id="btn-gdown">구글 시트에서 내려받기</button>
+      <a class="link-btn" id="g-link" target="_blank" rel="noopener noreferrer" hidden>내 구글 시트 열기 ↗</a>
       <button class="btn" id="btn-export">저장 백업 (코드 복사)</button>
       <button class="btn" id="btn-import">저장 불러오기</button>
       <button class="btn primary" id="btn-install" hidden>앱으로 설치하기</button>
       <button class="btn danger" id="btn-reset">기록 전체 초기화</button>
     </div>
+    <p class="hint">구글 시트에는 내 기록 + 같이 한 친구 기록(복구용)이 함께 올라가요. 시트의 ‘소원 목록’ 탭은 직접 고친 뒤 내려받으면 폰에 반영돼요.</p>
     <p class="hint">브라우저 메뉴에서 <b>홈 화면에 추가</b>를 해 두면 비행기 모드에서도 앱처럼 열 수 있어요.</p>
     <p class="version" id="app-version"></p>
   </section>
@@ -122,6 +126,7 @@
 <script src="js/store.js"></script>
 <script src="js/util.js"></script>
 <script src="js/net.js"></script>
+<script src="js/gsheet.js"></script>
 <script src="js/games/quick.js"></script>
 <script src="js/games/pong.js"></script>
 <script src="js/games/stars.js"></script>

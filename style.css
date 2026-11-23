@@ -328,3 +328,7 @@ button:disabled { cursor: default; }
 .req { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 14px; }
 .req canvas { width: 72px; height: 78px; background: var(--bg); border-radius: 12px; }
 .req b { font-size: 20px; }
+.friend-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; max-height: 50vh; overflow-y: auto; }
+.friend-pick { display: flex; align-items: center; gap: 10px; padding: 8px; background: var(--panel2); border: 2px solid var(--line); border-radius: 12px; text-align: left; }
+.friend-pick canvas { width: 48px; height: 52px; flex: none; background: var(--bg); border-radius: 8px; }
+#g-link { text-align: center; color: var(--accent); }
