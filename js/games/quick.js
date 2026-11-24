@@ -4,7 +4,8 @@
   const U = Duo.U;
   const WIN = 3;
   // 온라인에서도 공평하게: 각 기기에서 "신호를 본 순간 → 누른 순간"의 반응 시간을 직접 재서 보낸다.
-  const seenRound = [0, 0], seenAt = [0, 0], lastAc = [-1, -1];
+  // seenKey: 이번 신호(goAt은 판마다 무작위라 이전 게임 기록과 섞이지 않음)를 본 순간
+  const seenKey = [-1, -1], seenAt = [0, 0], lastAc = [-1, -1];
 
   Duo.register({
     id: 'quick',
@@ -20,9 +21,9 @@
     },
 
     annotate(st, inp, p, now) {
-      if (st.ph === 'go' && seenRound[p] !== st.round) { seenRound[p] = st.round; seenAt[p] = now; }
+      if (st.ph === 'go' && seenKey[p] !== st.goAt) { seenKey[p] = st.goAt; seenAt[p] = now; }
       if (lastAc[p] === -1) lastAc[p] = inp.ac;
-      if (inp.ac > lastAc[p] && st.ph === 'go' && seenRound[p] === st.round) {
+      if (inp.ac > lastAc[p] && st.ph === 'go' && seenKey[p] === st.goAt) {
         inp.rt = Math.max(1, Math.round(now - seenAt[p]));
         inp.rr = st.round;
       }
@@ -33,13 +34,16 @@
       st.t += dt;
       for (const p of [0, 1]) {
         if (!U.edge(st, inp, p, 'ac')) continue;
-        if (st.ph === 'wait') {
+        // 신호 전에 누름 = 반칙. 온라인에서는 신호가 화면에 뜨기 전에 누른 입력이 늦게 도착할 수 있는데,
+        // 그때는 반응 기록(rr)이 없으니 그것도 반칙으로 본다 (예전엔 방장 시간으로 재서 너무 빠른 기록이 됐음).
+        const early = st.ph === 'go' && !st.rt[p] && inp[p].rr !== st.round;
+        if (st.ph === 'wait' || early) {
           st.foul = p; st.win = 1 - p; st.sc[1 - p]++; st.ph = 'show'; st.t = 0;
           U.fx(st, 'bad');
           return;
         }
         if (st.ph === 'go' && !st.rt[p]) {
-          st.rt[p] = inp[p].rr === st.round && inp[p].rt > 0 ? inp[p].rt : Math.max(1, Math.round(st.t * 1000));
+          st.rt[p] = inp[p].rt > 0 ? inp[p].rt : Math.max(1, Math.round(st.t * 1000));
           if (st.first < 0) st.first = st.t;
         }
       }

@@ -32,7 +32,8 @@ Duo.U = {
 
   // ---------- 캐릭터 (이동 + 대시 + 기절) ----------
   newChar(p, x, y) {
-    return { p, x, y, fx: 0, fy: 1, dash: 0, cd: 0, stun: 0, inv: 0, down: 0, rev: 0, mv: 0 };
+    // 처음 바라보는 방향 = 상대 쪽 (1P는 위, 2P는 아래). 가만히 대시하면 이 방향으로 나간다.
+    return { p, x, y, fx: 0, fy: p ? 1 : -1, dash: 0, cd: 0, stun: 0, inv: 0, down: 0, rev: 0, mv: 0 };
   },
 
   stepChar(st, c, inp, dt, spd, dashPressed) {
