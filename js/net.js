@@ -57,8 +57,33 @@ const Net = (() => {
     return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
   }
 
+  // ---------- 연결 경로 (ICE) ----------
+  // STUN: 두 기기가 서로를 찾는 무료 안내 서버 (구글·클라우드플레어).
+  // TURN: LTE ↔ 와이파이처럼 직접 연결이 막힐 때 데이터를 대신 전달하는 중계 서버.
+  //       Metered 무료 계정의 키를 넣으면 켜진다. 비어 있으면 STUN만 쓴다.
+  const TURN_API = '';   // 예: 'https://앱이름.metered.live/api/v1/turn/credentials?apiKey=키'
+  let ice = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+  ];
+  let iceLoaded = !TURN_API;
+  async function loadIce() {
+    if (iceLoaded) return;
+    try {
+      const ctl = new AbortController();
+      const tm = setTimeout(() => ctl.abort(), 5000);
+      const res = await fetch(TURN_API, { signal: ctl.signal });
+      clearTimeout(tm);
+      const list = await res.json();
+      if (Array.isArray(list) && list.length) { ice = ice.concat(list.filter((x) => x && x.urls)); iceLoaded = true; }
+    } catch (e) { /* 중계 서버를 못 받아도 직접 연결은 시도 */ }
+  }
+
   function loadLib() {
-    if (window.Peer) return Promise.resolve();
+    const lib = window.Peer ? Promise.resolve() : loadPeerJs();
+    return Promise.all([lib, loadIce()]);
+  }
+  function loadPeerJs() {
     return new Promise((res, rej) => {
       const s = document.createElement('script');
       s.src = 'js/vendor/peerjs.min.js';
@@ -205,8 +230,9 @@ const Net = (() => {
   }
 
   function newPeer(id) {
-    // 공개 서버 0.peerjs.com (무료). STUN은 PeerJS 기본값(구글 무료 STUN) 사용.
-    const p = id ? new window.Peer(id, { debug: 0 }) : new window.Peer({ debug: 0 });
+    // 공개 서버 0.peerjs.com (무료)로 코드만 주고받고, 연결 경로는 위의 STUN(+TURN)으로 찾는다.
+    const opts = { debug: 0, config: { iceServers: ice } };
+    const p = id ? new window.Peer(id, opts) : new window.Peer(opts);
     // 서버와의 연결만 끊긴 경우(화면 꺼짐 등) 다시 붙는다. 새 사람/재연결을 받으려면 필요.
     p.on('disconnected', () => { setTimeout(() => { if (p === peer && !p.destroyed && p.disconnected) { try { p.reconnect(); } catch (e) { /* 무시 */ } } }, 1500); });
     return p;

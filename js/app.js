@@ -675,8 +675,11 @@
         R.sendT -= dt;
         if (R.sendT <= 0 || R.phase === 'over') {
           R.sendT = 1 / 30;
-          if (g.pack) g.pack(st);
-          Net.send({ t: 's', mid: R.mid, st, ph: R.phase, cd: Math.round(R.cd * 100) / 100, fx: R.fxBuf, res: R.phase === 'over' ? R.res : null });
+          // 보내는 양을 줄이려고 숫자를 반올림하는데, 반드시 '복사본'에만 한다.
+          // (원본을 반올림하면 타이머처럼 조금씩 줄어드는 값이 매번 되돌아가서 멈춘다)
+          let snap = st;
+          if (g.pack) { snap = JSON.parse(JSON.stringify(st)); g.pack(snap); }
+          Net.send({ t: 's', mid: R.mid, st: snap, ph: R.phase, cd: Math.round(R.cd * 100) / 100, fx: R.fxBuf, res: R.phase === 'over' ? R.res : null });
           R.fxBuf = [];
         }
       }
