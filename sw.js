@@ -1,6 +1,6 @@
 // 오프라인 지원: 처음 접속할 때 파일을 기기에 저장해 두고, 이후에는 인터넷 없이도 실행.
 // 온라인일 때는 백그라운드에서 최신 파일을 받아 다음 실행부터 반영한다.
-const CACHE = 'duo-arcade-v6';
+const CACHE = 'duo-arcade-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -18,6 +18,9 @@ const ASSETS = [
   './js/games/pong.js',
   './js/games/stars.js',
   './js/games/paint.js',
+  './js/games/sumo.js',
+  './js/games/bomb.js',
+  './js/games/tug.js',
   './js/games/meteor.js',
   './js/games/simon.js',
   './js/games/gems.js',
